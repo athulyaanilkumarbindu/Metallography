@@ -1,0 +1,77 @@
+# Free, open-source app to calculate SiC volume % and porosity from microstructure images
+# Built with Streamlit + OpenCV
+
+import streamlit as st
+import cv2
+import numpy as np
+from skimage import filters, morphology
+
+st.title("SiC–Al Volume Fraction & Porosity Analyzer")
+st.write("Upload a microstructure image (SEM/optical). Dark phase = SiC, light phase = Al, black = porosity.")
+
+# =========================
+# User input section
+# =========================
+user_name = st.text_input("User name")
+sample_name = st.text_input("Sample name")
+
+uploaded_file = st.file_uploader("Upload microstructure image", type=["png", "jpg", "jpeg", "tif"])
+
+if uploaded_file is not None:
+    # Read image as grayscale
+    file_bytes = np.asarray(bytearray(uploaded_file.read()), dtype=np.uint8)
+    img = cv2.imdecode(file_bytes, cv2.IMREAD_GRAYSCALE)
+
+    st.subheader("Original Microstructure")
+    st.image(img, clamp=True)
+
+    # =========================
+    # Preprocessing
+    # =========================
+    blur = cv2.GaussianBlur(img, (5, 5), 0)
+
+    # =========================
+    # Porosity detection (black regions)
+    # =========================
+    pore_threshold = np.percentile(blur, 5)  # darkest pixels
+    pores = blur < pore_threshold
+    pores = morphology.remove_small_objects(pores, min_size=50)
+
+    # =========================
+    # Phase segmentation (SiC vs Al)
+    # =========================
+    thresh_val = filters.threshold_otsu(blur[~pores])
+    phase_map = blur < thresh_val  # dark = SiC, light = Al
+
+    # Remove pores from phase map
+    phase_map[pores] = False
+
+    st.subheader("Segmented Phases")
+    st.image(phase_map.astype(np.uint8) * 255, caption="White: SiC | Black: Al / pores")
+
+    # =========================
+    # Quantification
+    # =========================
+    total_pixels = img.size
+    pore_pixels = np.sum(pores)
+    solid_pixels = total_pixels - pore_pixels
+
+    sic_pixels = np.sum(phase_map)
+    al_pixels = solid_pixels - sic_pixels
+
+    sic_vol_pct = (sic_pixels / solid_pixels) * 100
+    al_vol_pct = (al_pixels / solid_pixels) * 100
+    porosity_pct = (pore_pixels / total_pixels) * 100
+
+    # =========================
+    # Results
+    # =========================
+    st.subheader("Results")
+    st.write(f"**User:** {user_name}")
+    st.write(f"**Sample:** {sample_name}")
+
+    st.metric("SiC Volume %", f"{sic_vol_pct:.2f}")
+    st.metric("Aluminum Volume %", f"{al_vol_pct:.2f}")
+    st.metric("Porosity %", f"{porosity_pct:.2f}")
+
+    st.info("Assumptions: Dark phase = SiC, light phase = Al, pores are black. Area fraction ≈ volume fraction (2D stereology).")
